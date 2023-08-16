@@ -62,7 +62,13 @@ impl DocxDocument {
                 }
 
                 doc = doc.add_paragraph(para);
-            };
+            } else if chunk.chunk_type.is_end() {
+                self.stack_pop()?;
+            }
+        }
+
+        if !self.stack.is_empty() {
+            return Err(DocError::new("some block statements are not closed"));
         }
 
         Ok(doc)
@@ -109,16 +115,19 @@ impl DocxDocument {
                     children.push(child);
                 }
                 ChunkType::End => {
-                    if self.stack.is_empty() {
-                        return Err(DocError::new("unexpected block end"));
-                    }
-                    self.stack.pop();
+                    self.stack_pop()?;
+                    return Ok(children);
                 }
-                _ => (),
+                _ => {
+                    return Err(DocError::new(&format!(
+                        "unexpected chunk type: {}",
+                        c.chunk_type.to_string()
+                    )))
+                }
             }
         }
 
-        Ok(children)
+        Err(DocError::new("unexpected end of statement"))
     }
 
     fn parse_pic(&self, chunk: &Chunk) -> Result<Pic, DocError> {
@@ -210,10 +219,18 @@ impl DocxDocument {
         let chunk = &self.chunks[self.it];
         Some(chunk.clone())
     }
+
+    fn stack_pop(&mut self) -> Result<(), DocError> {
+        if self.stack.is_empty() {
+            return Err(DocError::new("unexpected 'end' chunk"));
+        }
+        self.stack.pop();
+        Ok(())
+    }
 }
 
+#[cfg(test)]
 mod tests {
-
     use crate::{
         types::{Chunk, ChunkType, Properties},
         DocxDocument,
@@ -235,9 +252,19 @@ mod tests {
     }
     fn end() -> Chunk {
         Chunk {
-            chunk_type: ChunkType::Paragraph,
+            chunk_type: ChunkType::End,
             text: None,
             props: Properties::new(),
+        }
+    }
+    fn hyperlink(url: String) -> Chunk {
+        Chunk {
+            chunk_type: ChunkType::Link,
+            text: None,
+            props: Properties {
+                url: Some(url),
+                ..Default::default()
+            },
         }
     }
 
@@ -271,6 +298,22 @@ mod tests {
                     ..Default::default()
                 },
             ),
+            end(),
+            para(Properties {
+                align: Some("center".to_owned()),
+                ..Default::default()
+            }),
+            hyperlink("https://webix.com".to_owned()),
+            text(
+                "Visit webix".to_owned(),
+                Properties {
+                    underline: Some(true),
+                    color: Some("#0066ff".to_owned()),
+                    background: Some("#ff00ff".to_owned()),
+                    ..Default::default()
+                },
+            ),
+            end(),
             end(),
         ];
 

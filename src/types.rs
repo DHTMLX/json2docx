@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, PartialEq, Clone, Copy)]
 pub enum ChunkType {
@@ -111,6 +111,22 @@ impl ChunkType {
         match self {
             ChunkType::Ol | ChunkType::Ul => true,
             _ => false,
+        }
+    }
+    pub fn is_end(self) -> bool {
+        self == ChunkType::End
+    }
+
+    pub fn to_string(self) -> String {
+        match self {
+            ChunkType::Paragraph => "paragraph".to_string(),
+            ChunkType::Text => "text".to_string(),
+            ChunkType::Image => "image".to_string(),
+            ChunkType::Link => "link".to_string(),
+            ChunkType::Ul => "ul".to_string(),
+            ChunkType::Ol => "ol".to_string(),
+            ChunkType::Li => "li".to_string(),
+            ChunkType::End => "end".to_string(),
         }
     }
 }
