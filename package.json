@@ -1,0 +1,27 @@
+{
+  "name": "json2docx",
+  "version": "1.0.0",
+  "description": "json2docx parser",
+  "author": "",
+  "license": "ISC",
+  "files": [
+    "pkg/json2docx_bg.wasm",
+    "pkg/json2docx.js",
+    "pkg/json2docx_bg.js",
+    "pkg/json2docx.d.ts",
+    "js/worker.js",
+    "js/module.js"
+  ],
+  "module": "js/module.js",
+  "scripts": {
+    "dev": "cargo build && wasm-pack build && vite",
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^4.2.0",
+    "vite-plugin-wasm": "^3.2.2",
+    "vite-plugin-top-level-await": "^1.3.0"
+  }
+}
