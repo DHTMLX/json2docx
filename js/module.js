@@ -7,7 +7,7 @@ export function convert(data) {
   }
 
   const doc = DocxDocument.new();
-  const result = doc.from_chunks();
+  const result = doc.from_js_chunks();
 
   console.log(result);
 

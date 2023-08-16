@@ -12,7 +12,7 @@ onmessage = function(e) {
 
 function doConvert(data, config = {}){
     const doc = DocxDocument.new();
-    const result = doc.from_chunks(data);
+    const result = doc.from_js_chunks(data);
     
     const blob = new Blob([result], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"

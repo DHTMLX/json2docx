@@ -1,5 +1,6 @@
+use serde::{Serialize, Deserialize};
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Copy)]
 pub enum ChunkType {
     Paragraph = 2 | 0x4000 | 0x2000,
     Text = 3 | 0x8000,
@@ -11,15 +12,14 @@ pub enum ChunkType {
     End = 0x1fff,
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Chunk {
-    id: usize,
-    chunk_type: ChunkType,
-    text: Option<String>,
+    pub chunk_type: ChunkType,
+    pub text: Option<String>,
     pub props: Properties,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Properties {
     pub url: Option<String>,
     pub color: Option<String>,
@@ -35,50 +35,49 @@ pub struct Properties {
 }
 
 impl Chunk {
-    pub fn new(id: usize, t: ChunkType) -> Chunk {
+    pub fn new(t: ChunkType) -> Chunk {
         Chunk {
-            id: id,
             chunk_type: t,
             props: Properties::new(),
             text: None,
         }
     }
 
-    pub fn set_text(&mut self, text: String) {
-        if self.chunk_type == ChunkType::Text {
-            self.text = Some(text);
-        }
-    }
+    // pub fn set_text(&mut self, text: String) {
+    //     if self.chunk_type == ChunkType::Text {
+    //         self.text = Some(text);
+    //     }
+    // }
 
-    pub fn set_url(&mut self, url: String) {
-        if self.chunk_type == ChunkType::Image || self.chunk_type == ChunkType::Link {
-            self.props.url = Some(url);
-        }
-    }
+    // pub fn set_url(&mut self, url: String) {
+    //     if self.chunk_type == ChunkType::Image || self.chunk_type == ChunkType::Link {
+    //         self.props.url = Some(url);
+    //     }
+    // }
 
-    pub fn set_props(&mut self, props: Properties) {
-        match self.chunk_type {
-            ChunkType::Paragraph
-            | ChunkType::Li
-            | ChunkType::Ol
-            | ChunkType::Ul
-            | ChunkType::Link => {
-                self.props.indent = props.indent;
-                self.props.align = props.align;
-                self.props.line_height = props.line_height;
-            }
-            ChunkType::Text => {
-                self.props.color = props.color;
-                self.props.background = props.background;
-                self.props.font_size = props.font_size;
-                self.props.font_family = props.font_family;
-                self.props.bold = props.bold;
-                self.props.italic = props.italic;
-                self.props.underline = props.underline;
-            }
-            _ => (),
-        }
-    }
+    // pub fn set_props(&mut self, props: Properties) {
+    //     match self.chunk_type {
+    //         ChunkType::Paragraph
+    //         | ChunkType::Li
+    //         | ChunkType::Ol
+    //         | ChunkType::Ul
+    //         | ChunkType::Link => {
+    //             self.props.indent = props.indent;
+    //             self.props.align = props.align;
+    //             self.props.line_height = props.line_height;
+    //         }
+    //         ChunkType::Text => {
+    //             self.props.color = props.color;
+    //             self.props.background = props.background;
+    //             self.props.font_size = props.font_size;
+    //             self.props.font_family = props.font_family;
+    //             self.props.bold = props.bold;
+    //             self.props.italic = props.italic;
+    //             self.props.underline = props.underline;
+    //         }
+    //         _ => (),
+    //     }
+    // }
 }
 
 impl Properties {
@@ -98,5 +97,20 @@ impl Properties {
             && self.align == None
             && self.indent == None
             && self.line_height == None
+    }
+}
+
+impl ChunkType {
+    pub fn is_paragraph(self) -> bool {
+        match self {
+            ChunkType::Paragraph | ChunkType::Ol | ChunkType::Ul => true,
+            _ => false,
+        }
+    }
+    pub fn is_list(self) -> bool {
+        match self {
+            ChunkType::Ol | ChunkType::Ul => true,
+            _ => false,
+        }
     }
 }
