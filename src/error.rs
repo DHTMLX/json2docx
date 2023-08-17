@@ -20,4 +20,12 @@ impl fmt::Display for DocError {
     }
 }
 
-impl Error for DocError {}
+impl Error for DocError {
+    fn description(&self) -> &str {
+        &self.message
+    }
+
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
+    }
+}

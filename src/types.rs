@@ -35,6 +35,8 @@ pub struct Properties {
     pub align: Option<String>,
     pub indent: Option<String>,
     pub line_height: Option<String>,
+    pub width: Option<String>,
+    pub height: Option<String>,
 }
 
 #[derive(Clone, Copy)]
