@@ -7,9 +7,9 @@ use std::io::Cursor;
 use base64::{engine::general_purpose, Engine};
 
 use docx_rs::{
-    AbstractNumbering, AlignmentType, Docx, Hyperlink, HyperlinkType, IndentLevel, Level, LevelJc,
-    LevelText, NumberFormat, Numbering, NumberingId, Paragraph, ParagraphChild, ParagraphProperty,
-    Pic, Run, RunFonts, RunProperty, SpecialIndentType, Start,
+    AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel,
+    Level, LevelJc, LevelText, NumberFormat, Numbering, NumberingId, Paragraph, ParagraphChild,
+    ParagraphProperty, Pic, Run, RunFonts, RunProperty, SpecialIndentType, Start,
 };
 use error::DocError;
 use types::{Chunk, ChunkType, NumberingData, NumberingType, Properties};
@@ -71,10 +71,6 @@ impl DocxDocument {
                         doc = doc.add_paragraph(p.to_owned());
                     }
                 }
-                // ChunkType::End => {
-                //     self.stack_pop()?;
-                //     continue;
-                // }
                 _ => continue,
             }
         }
@@ -129,13 +125,7 @@ impl DocxDocument {
                     self.stack_pop()?;
                     return Ok(buf);
                 }
-                _ => {
-                    // FIXME remove this return
-                    return Err(DocError::new(&format!(
-                        "unexpected chunk type: {}",
-                        c.chunk_type.to_string()
-                    )));
-                }
+                _ => (),
             }
         }
 
@@ -156,6 +146,11 @@ impl DocxDocument {
             match c.chunk_type {
                 ChunkType::Text => {
                     let run = self.parse_text(&c)?;
+                    let child = ParagraphChild::Run(Box::new(run));
+                    children.push(child);
+                }
+                ChunkType::Break => {
+                    let run = Run::new().add_break(BreakType::TextWrapping);
                     let child = ParagraphChild::Run(Box::new(run));
                     children.push(child);
                 }
@@ -180,13 +175,7 @@ impl DocxDocument {
                     self.stack_pop()?;
                     return Ok(children);
                 }
-                _ => {
-                    // FIXME remove this return
-                    return Err(DocError::new(&format!(
-                        "unexpected chunk type: {}",
-                        c.chunk_type.to_string()
-                    )));
-                }
+                _ => (),
             }
         }
 
@@ -245,7 +234,7 @@ impl DocxDocument {
         }
         if let Some(indent) = &props.indent {
             let px = utils::parse_str_size(indent, 2)?;
-            let left_emu = utils::px_to_emu(px);
+            let left_emu = utils::px_to_indent(px);
             para_props = para_props.indent(Some(left_emu), None, None, None);
         }
         if let Some(_lh) = &props.line_height {
@@ -317,7 +306,7 @@ impl DocxDocument {
     }
 
     fn add_numbering(&mut self, t: NumberingType) -> usize {
-        let id = self.numberings.len() + 1;
+        let id = self.numberings.len() + 2; // id=1 is preserved id
         self.numberings.push(NumberingData::new(id, t));
         id
     }
@@ -353,12 +342,13 @@ fn numbering_level(l: usize, t: NumberingType) -> Level {
         None,
         None,
     )
+    .size(utils::px_to_docx_points(16) as usize) // 12 pt
 }
 
 fn get_numbering_text(l: usize, t: NumberingType) -> String {
     match t {
         NumberingType::Bullet => BULLETS[l % BULLETS.len()].to_owned(),
-        NumberingType::Decimal => format!("%{}", l + 1).to_owned(),
+        NumberingType::Decimal => format!("%{}.", l + 1).to_owned(),
     }
 }
 
@@ -527,9 +517,16 @@ mod tests {
                 }),
             ),
             end(),
-            ol(None),
+            ul(None),
             /**/ li(None),
-            /**//**/ text("Kanban".to_owned(), None),
+            /**//**/
+            text(
+                "Kanban".to_owned(),
+                Some(Properties {
+                    font_size: Some("32px".to_owned()),
+                    ..Default::default()
+                }),
+            ),
             /**/ end(),
             /**/ li(None),
             /**//**/ text("To Do List".to_owned(), None),

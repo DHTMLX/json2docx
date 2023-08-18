@@ -56,6 +56,10 @@ pub fn px_to_docx_points(px: i32) -> i32 {
     pt * 2
 }
 
+pub fn px_to_indent(px: i32) -> i32 {
+    px * 15
+}
+
 fn px_to_pt(px: i32) -> i32 {
     (px as f32 * 0.75) as i32
 }

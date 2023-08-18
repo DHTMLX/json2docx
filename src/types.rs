@@ -13,6 +13,7 @@ pub enum ChunkType {
     Ol = 9 | 0x2000 | 0x4000,
     Li = 10 | 0x2000 | 0x4000,
     End = 0x1fff,
+    Break = 11 | 0x4000,
     // TODO Newline
 }
 
@@ -62,6 +63,7 @@ impl ChunkType {
             ChunkType::Ol => "ol".to_string(),
             ChunkType::Li => "li".to_string(),
             ChunkType::End => "end".to_string(),
+            ChunkType::Break => "break".to_string(),
         }
     }
 }
@@ -80,7 +82,6 @@ impl NumberingType {
             ChunkType::Ol => Ok(NumberingType::Decimal),
             _ => return Err(DocError::new("unknown numbering type")),
         }
-        // TODO handle "none" type
     }
 }
 
@@ -123,6 +124,7 @@ impl<'de> Deserialize<'de> for ChunkType {
                     24585 => Ok(ChunkType::Ol),
                     24586 => Ok(ChunkType::Li),
                     8191 => Ok(ChunkType::End),
+                    16395 => Ok(ChunkType::Break),
                     _ => Err(serde::de::Error::custom("Unknown chunk_type value")),
                 }
             }
