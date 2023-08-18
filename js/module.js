@@ -1,22 +1,17 @@
-import { DocxDocument } from '../pkg/json2docx.js';
+import { DocxDocument } from "../pkg/json2docx.js";
 
 export function convert(data) {
-
   if (typeof data == "string") {
     data = JSON.parse(data);
   }
 
+  console.log(data, JSON.stringify(data));
   const doc = DocxDocument.new();
-  const result = doc.from_js_chunks();
+  const result = doc.from_js_chunks(data);
 
-  console.log(result);
+  const blob = new Blob([result], {
+    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,",
+  });
 
-  return;
-
-  // const result = import_to_xlsx(data);
-  // const blob = new Blob([result], {
-  //     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,"
-  // });
-
-  // return blob;
+  return blob;
 }

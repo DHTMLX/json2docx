@@ -1,8 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 
 use crate::error::DocError;
 
-#[derive(Serialize, Deserialize, PartialEq, Clone, Copy)]
+#[derive(Serialize, PartialEq, Clone, Copy)]
 pub enum ChunkType {
     Paragraph = 2 | 0x4000 | 0x2000,
     Text = 3 | 0x8000,
@@ -19,7 +20,7 @@ pub enum ChunkType {
 pub struct Chunk {
     pub chunk_type: ChunkType,
     pub text: Option<String>,
-    pub props: Properties,
+    pub props: Option<Properties>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -97,5 +98,37 @@ impl NumberingData {
 
     pub fn get_type(&self) -> NumberingType {
         self.num_type
+    }
+}
+
+impl<'de> Deserialize<'de> for ChunkType {
+    fn deserialize<D>(deserializer: D) -> Result<ChunkType, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = Deserialize::deserialize(deserializer)?;
+
+        match value {
+            Value::Number(n) => {
+                let chunk_type_value = n
+                    .as_u64()
+                    .ok_or_else(|| serde::de::Error::custom("Invalid chunk_type value"))?;
+
+                match chunk_type_value {
+                    24578 => Ok(ChunkType::Paragraph),
+                    32771 => Ok(ChunkType::Text),
+                    32773 => Ok(ChunkType::Image),
+                    40966 => Ok(ChunkType::Link),
+                    24584 => Ok(ChunkType::Ul),
+                    24585 => Ok(ChunkType::Ol),
+                    24586 => Ok(ChunkType::Li),
+                    8191 => Ok(ChunkType::End),
+                    _ => Err(serde::de::Error::custom("Unknown chunk_type value")),
+                }
+            }
+            _ => Err(serde::de::Error::custom(
+                "Invalid JSON value type for chunk_type",
+            )),
+        }
     }
 }

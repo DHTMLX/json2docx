@@ -36,8 +36,9 @@ impl DocxDocument {
         Default::default()
     }
 
-    pub fn from_js_chunks(&mut self, raw: JsValue) -> Vec<u8> {
-        let chunks = raw.into_serde().unwrap();
+    pub fn from_js_chunks(&mut self, raw: &JsValue) -> Vec<u8> {
+        utils::set_panic_hook();
+        let chunks: Vec<Chunk> = raw.into_serde().unwrap();
         self.from_chunks(chunks)
     }
 
@@ -90,7 +91,9 @@ impl DocxDocument {
     fn parse_block(&mut self, block_chunk: &Chunk) -> Result<Paragraph, DocError> {
         let mut para = Paragraph::new();
 
-        para.property = self.parse_block_props(&block_chunk.props)?;
+        if let Some(p) = &block_chunk.props {
+            para.property = self.parse_block_props(p)?;
+        }
         para.children = self.parse_block_content(block_chunk)?;
 
         Ok(para)
@@ -163,8 +166,11 @@ impl DocxDocument {
                     children.push(child);
                 }
                 ChunkType::Link => {
-                    let mut hp =
-                        Hyperlink::new(c.props.url.to_owned().unwrap(), HyperlinkType::External);
+                    let mut hp = Hyperlink::new(
+                        c.props.as_ref().unwrap().url.to_owned().unwrap(),
+                        HyperlinkType::External,
+                    );
+
                     hp.children = self.parse_block_content(&c)?;
 
                     let child = ParagraphChild::Hyperlink(hp);
@@ -190,19 +196,25 @@ impl DocxDocument {
     fn parse_pic(&self, chunk: &Chunk) -> Result<Pic, DocError> {
         let buf = self.parse_pic_source(chunk)?;
 
-        let w = utils::parse_str_size(&chunk.props.width.to_owned().unwrap(), 2)? * 9525;
-        let h = utils::parse_str_size(&chunk.props.height.to_owned().unwrap(), 2)? * 9525;
+        let props = chunk.props.as_ref().unwrap();
 
-        let pic = Pic::new(&buf).size(w, h);
+        let w_px = utils::parse_str_size(&props.width.to_owned().unwrap(), 2)?;
+        let w_emu = utils::px_to_emu(w_px) as u32;
+
+        let h_px = utils::parse_str_size(&props.height.to_owned().unwrap(), 2)?;
+        let h_emu = utils::px_to_emu(h_px) as u32;
+
+        let pic = Pic::new(&buf).size(w_emu, h_emu);
 
         Ok(pic)
     }
 
     fn parse_pic_source(&self, chunk: &Chunk) -> Result<Vec<u8>, DocError> {
-        let url = chunk.props.url.to_owned().unwrap();
+        let url = chunk.props.as_ref().unwrap().url.to_owned().unwrap();
 
         if utils::is_url(&url) {
-            return Ok(utils::download_file(&url)?);
+            // return Ok(utils::download_file(&url)?);
+            return Err(DocError::new("image from urls not supported now"));
         }
 
         // try convert from base64
@@ -215,7 +227,9 @@ impl DocxDocument {
 
     fn parse_text(&self, chunk: &Chunk) -> Result<Run, DocError> {
         let mut run = Run::new().add_text(chunk.text.to_owned().unwrap());
-        run.run_property = self.parse_run_props(&chunk.props)?;
+        if let Some(p) = &chunk.props {
+            run.run_property = self.parse_run_props(p)?;
+        }
         Ok(run)
     }
 
@@ -229,8 +243,10 @@ impl DocxDocument {
                 Err(_) => return Err(DocError::new(&format!("unknown alignment type: {}", align))),
             };
         }
-        if let Some(_indent) = &props.indent {
-            // TODO parse indent
+        if let Some(indent) = &props.indent {
+            let px = utils::parse_str_size(indent, 2)?;
+            let left_emu = utils::px_to_emu(px);
+            para_props = para_props.indent(Some(left_emu), None, None, None);
         }
         if let Some(_lh) = &props.line_height {
             // TODO parse line height
@@ -260,16 +276,17 @@ impl DocxDocument {
             run_props = run_props.color(color);
         }
         if let Some(sz) = &props.font_size {
-            let v = utils::parse_str_size(sz, 2)? as usize;
-            run_props = run_props.size(v);
+            let px = utils::parse_str_size(sz, 2)?;
+            let sz_pt = utils::px_to_docx_points(px) as usize;
+            run_props = run_props.size(sz_pt);
         }
         if let Some(fam) = &props.font_family {
             run_props = run_props.fonts(RunFonts::new().ascii(fam));
         }
-        if let Some(highlight) = &props.background {
-            // FIXME need to support of add RunProperty.Shading in docx-rs. 'Highlight' is another thing
-            run_props = run_props.highlight(highlight);
-        }
+        // if let Some(highlight) = &props.background {
+        //     // FIXME need to support of add RunProperty.Shading in docx-rs. 'Highlight' is another thing
+        //     run_props = run_props.highlight(highlight);
+        // }
 
         Ok(run_props)
     }
@@ -353,35 +370,35 @@ mod tests {
     };
     use std::io::Write;
 
-    fn text(text: String, props: Properties) -> Chunk {
+    fn text(text: String, props: Option<Properties>) -> Chunk {
         Chunk {
             chunk_type: ChunkType::Text,
             text: Some(text.to_owned()),
             props: props,
         }
     }
-    fn para(props: Properties) -> Chunk {
+    fn para(props: Option<Properties>) -> Chunk {
         Chunk {
             chunk_type: ChunkType::Paragraph,
             text: None,
             props: props,
         }
     }
-    fn ol(props: Properties) -> Chunk {
+    fn ol(props: Option<Properties>) -> Chunk {
         Chunk {
             chunk_type: ChunkType::Ol,
             text: None,
             props: props,
         }
     }
-    fn ul(props: Properties) -> Chunk {
+    fn ul(props: Option<Properties>) -> Chunk {
         Chunk {
             chunk_type: ChunkType::Ul,
             text: None,
             props: props,
         }
     }
-    fn li(props: Properties) -> Chunk {
+    fn li(props: Option<Properties>) -> Chunk {
         Chunk {
             chunk_type: ChunkType::Li,
             text: None,
@@ -399,21 +416,21 @@ mod tests {
         Chunk {
             chunk_type: ChunkType::Link,
             text: None,
-            props: Properties {
+            props: Some(Properties {
                 url: Some(url),
                 ..Default::default()
-            },
+            }),
         }
     }
     fn image(url: &String, w: usize, h: usize) -> Chunk {
         Chunk {
             chunk_type: ChunkType::Image,
-            props: Properties {
+            props: Some(Properties {
                 url: Some(url.to_owned()),
                 width: Some(format!("{}px", w.to_string())),
                 height: Some(format!("{}px", h.to_string())),
                 ..Default::default()
-            },
+            }),
             text: None,
         }
     }
@@ -427,47 +444,47 @@ mod tests {
     #[test]
     fn test_para() {
         let chunks = vec![
-            para(Properties {
+            para(Some(Properties {
                 align: Some("end".to_owned()),
                 ..Default::default()
-            }),
+            })),
             text(
                 "Hello".to_owned(),
-                Properties {
+                Some(Properties {
                     bold: Some(true),
                     ..Default::default()
-                },
+                }),
             ),
             text(
                 "Rust".to_owned(),
-                Properties {
+                Some(Properties {
                     italic: Some(true),
                     underline: Some(true),
                     font_size: Some("32px".to_owned()),
                     ..Default::default()
-                },
+                }),
             ),
             text(
                 "!!!".to_owned(),
-                Properties {
+                Some(Properties {
                     background: Some("#123".to_owned()),
                     ..Default::default()
-                },
+                }),
             ),
             end(),
-            para(Properties {
+            para(Some(Properties {
                 align: Some("center".to_owned()),
                 ..Default::default()
-            }),
+            })),
             hyperlink("https://webix.com".to_owned()),
             text(
                 "Visit webix".to_owned(),
-                Properties {
+                Some(Properties {
                     underline: Some(true),
                     color: Some("#0066ff".to_owned()),
                     background: Some("#ff00ff".to_owned()),
                     ..Default::default()
-                },
+                }),
             ),
             end(),
             end(),
@@ -482,62 +499,62 @@ mod tests {
     #[test]
     fn test_numbering() {
         let chunks = vec![
-            para(Properties {
+            para(Some(Properties {
                 align: Some("end".to_owned()),
                 ..Default::default()
-            }),
+            })),
             text(
                 "Hello".to_owned(),
-                Properties {
+                Some(Properties {
                     bold: Some(true),
                     ..Default::default()
-                },
+                }),
             ),
             text(
                 "Rust".to_owned(),
-                Properties {
+                Some(Properties {
                     italic: Some(true),
                     underline: Some(true),
                     font_size: Some("32px".to_owned()),
                     ..Default::default()
-                },
+                }),
             ),
             text(
                 "!!!".to_owned(),
-                Properties {
+                Some(Properties {
                     background: Some("#123".to_owned()),
                     ..Default::default()
-                },
+                }),
             ),
             end(),
-            ol(Properties::default()),
-            /**/ li(Properties::default()),
-            /**//**/ text("Kanban".to_owned(), Properties::default()),
+            ol(None),
+            /**/ li(None),
+            /**//**/ text("Kanban".to_owned(), None),
             /**/ end(),
-            /**/ li(Properties::default()),
-            /**//**/ text("To Do List".to_owned(), Properties::default()),
+            /**/ li(None),
+            /**//**/ text("To Do List".to_owned(), None),
             /**/ end(),
-            /**/ ul(Properties::default()),
-            /**//**/ li(Properties::default()),
-            /**//**//**/ text("Label".to_owned(), Properties::default()),
+            /**/ ul(None),
+            /**//**/ li(None),
+            /**//**//**/ text("Label".to_owned(), None),
             /**//**/ end(),
-            /**//**/ li(Properties::default()),
-            /**//**//**/ text("Due date".to_owned(), Properties::default()),
+            /**//**/ li(None),
+            /**//**//**/ text("Due date".to_owned(), None),
             /**//**/ end(),
-            /**//**/ ul(Properties::default()),
-            /**//**//**/ li(Properties::default()),
-            /**//**//**//**/ text("Time zone".to_owned(), Properties::default()),
+            /**//**/ ul(None),
+            /**//**//**/ li(None),
+            /**//**//**//**/ text("Time zone".to_owned(), None),
             /**//**//**/ end(),
-            /**//**//**/ li(Properties::default()),
-            /**//**//**//**/ text("Time".to_owned(), Properties::default()),
+            /**//**//**/ li(None),
+            /**//**//**//**/ text("Time".to_owned(), None),
             /**//**//**/ end(),
             /**//**/ end(),
-            /**//**/ li(Properties::default()),
-            /**//**//**/ text("Checked".to_owned(), Properties::default()),
+            /**//**/ li(None),
+            /**//**//**/ text("Checked".to_owned(), None),
             /**//**/ end(),
             /**/ end(),
-            /**/ li(Properties::default()),
-            /**//**/ text("Gantt".to_owned(), Properties::default()),
+            /**/ li(None),
+            /**//**/ text("Gantt".to_owned(), None),
             /**/ end(),
             end(),
         ];
@@ -548,17 +565,15 @@ mod tests {
         save_docx(bytes, "./temp/output/numbering.docx".to_owned());
     }
 
-    #[test]
+    // #[test]
     fn test_url_image() {
         let chunks = vec![
-            para(Properties {
-                ..Default::default()
-            }),
-            text("Image from url: ".to_owned(), Properties{
+            para(None),
+            text("Image from url: ".to_owned(), Some(Properties{
                 font_size: Some("32px".to_owned()),
                 bold: Some(true),
                 ..Default::default()
-            }),
+            })),
             image(&"https://secure.gravatar.com/avatar/f73e468790011e5382f1797ff7648b76?d=identicon&s=50".to_owned(), 60, 60),
             end(),
         ];
@@ -572,14 +587,12 @@ mod tests {
     #[test]
     fn test_base64_image() {
         let chunks = vec![
-            para(Properties {
-                ..Default::default()
-            }),
-            text("Image from Base64 String: ".to_owned(), Properties{
+            para(None),
+            text("Image from Base64 String: ".to_owned(), Some(Properties{
                 font_size: Some("32px".to_owned()),
                 bold: Some(true),
                 ..Default::default()
-            }),
+            })),
             image(&"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".to_owned(), 30, 30),
             end(),
         ];
