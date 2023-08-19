@@ -14,7 +14,6 @@ pub enum ChunkType {
     Li = 10 | 0x2000 | 0x4000,
     End = 0x1fff,
     Break = 11 | 0x4000,
-    // TODO Newline
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -23,8 +22,8 @@ pub struct Chunk {
     pub text: Option<String>,
     pub props: Option<Properties>,
 }
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+// TODO Px struct
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Properties {
     pub url: Option<String>,
     pub color: Option<String>,
@@ -52,18 +51,22 @@ pub struct NumberingData {
     num_type: NumberingType,
 }
 
-impl ChunkType {
-    pub fn to_string(self) -> String {
-        match self {
-            ChunkType::Paragraph => "paragraph".to_string(),
-            ChunkType::Text => "text".to_string(),
-            ChunkType::Image => "image".to_string(),
-            ChunkType::Link => "link".to_string(),
-            ChunkType::Ul => "ul".to_string(),
-            ChunkType::Ol => "ol".to_string(),
-            ChunkType::Li => "li".to_string(),
-            ChunkType::End => "end".to_string(),
-            ChunkType::Break => "break".to_string(),
+impl Default for Properties {
+    fn default() -> Self {
+        Properties {
+            font_size: Some("16px".to_owned()),
+            url: None,
+            color: None,
+            background: None,
+            font_family: None,
+            bold: None,
+            italic: None,
+            underline: None,
+            align: None,
+            indent: None,
+            line_height: None,
+            width: None,
+            height: None,
         }
     }
 }

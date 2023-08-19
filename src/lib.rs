@@ -8,8 +8,8 @@ use base64::{engine::general_purpose, Engine};
 
 use docx_rs::{
     AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel,
-    Level, LevelJc, LevelText, NumberFormat, Numbering, NumberingId, Paragraph, ParagraphChild,
-    ParagraphProperty, Pic, Run, RunFonts, RunProperty, SpecialIndentType, Start,
+    Level, LevelJc, LevelText, LineSpacing, NumberFormat, Numbering, NumberingId, Paragraph,
+    ParagraphChild, ParagraphProperty, Pic, Run, RunFonts, RunProperty, SpecialIndentType, Start,
 };
 use error::DocError;
 use types::{Chunk, ChunkType, NumberingData, NumberingType, Properties};
@@ -55,6 +55,7 @@ impl DocxDocument {
 
     fn build(&mut self) -> Result<Docx, DocError> {
         let mut doc: Docx = docx_rs::Docx::new();
+        doc = doc.default_size(utils::px_to_docx_points(utils::DEFAULT_SZ_PX as i32) as usize);
 
         while self.next().is_some() {
             let chunk = self.curr().unwrap();
@@ -87,10 +88,12 @@ impl DocxDocument {
     fn parse_block(&mut self, block_chunk: &Chunk) -> Result<Paragraph, DocError> {
         let mut para = Paragraph::new();
 
+        let (children, max_sz) = self.parse_block_content(block_chunk)?;
+        para.children = children;
+
         if let Some(p) = &block_chunk.props {
-            para.property = self.parse_block_props(p)?;
+            para.property = self.parse_block_props(p, max_sz)?;
         }
-        para.children = self.parse_block_content(block_chunk)?;
 
         Ok(para)
     }
@@ -135,19 +138,26 @@ impl DocxDocument {
     fn parse_block_content(
         &mut self,
         block_chunk: &Chunk,
-    ) -> Result<Vec<ParagraphChild>, DocError> {
+    ) -> Result<(Vec<ParagraphChild>, usize), DocError> {
         self.stack.push(block_chunk.chunk_type);
 
         let mut children: Vec<ParagraphChild> = vec![];
+        let mut max_font_size = 0;
 
         while self.next().is_some() {
             let c = self.curr().unwrap();
 
             match c.chunk_type {
                 ChunkType::Text => {
-                    let run = self.parse_text(&c)?;
-                    let child = ParagraphChild::Run(Box::new(run));
+                    let run = &self.parse_text(&c)?;
+                    let child = ParagraphChild::Run(Box::new(run.to_owned()));
                     children.push(child);
+
+                    if let Some(sz) = &run.run_property.sz {
+                        if sz.val > max_font_size {
+                            max_font_size = sz.val;
+                        }
+                    }
                 }
                 ChunkType::Break => {
                     let run = Run::new().add_break(BreakType::TextWrapping);
@@ -166,14 +176,19 @@ impl DocxDocument {
                         HyperlinkType::External,
                     );
 
-                    hp.children = self.parse_block_content(&c)?;
+                    let (link_children, max_sz) = self.parse_block_content(&c)?;
+                    hp.children = link_children;
 
                     let child = ParagraphChild::Hyperlink(hp);
                     children.push(child);
+
+                    if max_sz > max_font_size {
+                        max_font_size = max_sz;
+                    }
                 }
                 ChunkType::End => {
                     self.stack_pop()?;
-                    return Ok(children);
+                    return Ok((children, max_font_size));
                 }
                 _ => (),
             }
@@ -222,7 +237,11 @@ impl DocxDocument {
         Ok(run)
     }
 
-    fn parse_block_props(&self, props: &Properties) -> Result<ParagraphProperty, DocError> {
+    fn parse_block_props(
+        &self,
+        props: &Properties,
+        max_sz: usize,
+    ) -> Result<ParagraphProperty, DocError> {
         let mut para_props = ParagraphProperty::new();
 
         if let Some(align) = &props.align {
@@ -237,8 +256,22 @@ impl DocxDocument {
             let left_emu = utils::px_to_indent(px);
             para_props = para_props.indent(Some(left_emu), None, None, None);
         }
-        if let Some(_lh) = &props.line_height {
-            // TODO parse line height
+        if let Some(v) = &props.line_height {
+            let line_height = match v.parse::<f32>() {
+                Ok(v) => v,
+                Err(_) => return Err(DocError::new(&format!("unbale to parse string: {}", v))),
+            };
+
+            let sz = if max_sz == 0 {
+                utils::DEFAULT_SZ_PX
+            } else {
+                max_sz
+            } as f32;
+
+            let spacing_px = (((sz * line_height) - sz) / 2.0) as i32;
+            let spacing = utils::px_to_indent(spacing_px) as u32;
+
+            para_props = para_props.line_spacing(LineSpacing::new().after(spacing).before(spacing));
         }
 
         Ok(para_props)
@@ -531,7 +564,7 @@ mod tests {
             /**/ li(None),
             /**//**/ text("To Do List".to_owned(), None),
             /**/ end(),
-            /**/ ul(None),
+            /**/ ol(None),
             /**//**/ li(None),
             /**//**//**/ text("Label".to_owned(), None),
             /**//**/ end(),
@@ -563,7 +596,7 @@ mod tests {
     }
 
     // #[test]
-    fn test_url_image() {
+    fn _test_url_image() {
         let chunks = vec![
             para(None),
             text("Image from url: ".to_owned(), Some(Properties{
@@ -598,5 +631,52 @@ mod tests {
 
         let bytes = d.from_chunks(chunks);
         save_docx(bytes, "./temp/output/image_base64.docx".to_owned());
+    }
+
+    #[test]
+    fn test_spacing() {
+        let chunks = vec![
+            para(None),
+            text("Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+            end(),
+            para(Some(Properties {
+                line_height: Some("1.0".to_owned()),
+                ..Default::default()
+            })),
+            text("1.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+            end(),
+            para(None),
+            text("Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+            end(),
+            para(Some(Properties {
+                line_height: Some("2.0".to_owned()),
+                ..Default::default()
+            })),
+            text("2.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+            end(),
+            para(Some(Properties {
+                line_height: Some("3.0".to_owned()),
+                ..Default::default()
+            })),
+            text("3.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+            end(),
+            para(Some(Properties {
+                line_height: Some("4.0".to_owned()),
+                ..Default::default()
+            })),
+            text("4.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+            end(),
+            para(Some(Properties {
+                line_height: Some("1.5".to_owned()),
+                ..Default::default()
+            })),
+            text("1.5 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+            end(),
+        ];
+
+        let mut d = DocxDocument::new();
+
+        let bytes = d.from_chunks(chunks);
+        save_docx(bytes, "./temp/output/spacing.docx".to_owned());
     }
 }

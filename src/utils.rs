@@ -2,6 +2,8 @@ use regex::Regex;
 
 use crate::error::DocError;
 
+pub static DEFAULT_SZ_PX: usize = 16;
+
 pub fn set_panic_hook() {
     // When the `console_error_panic_hook` feature is enabled, we can call the
     // `set_panic_hook` function at least once during initialization, and then
@@ -61,5 +63,5 @@ pub fn px_to_indent(px: i32) -> i32 {
 }
 
 fn px_to_pt(px: i32) -> i32 {
-    (px as f32 * 0.75) as i32
+    (px as f32 * 0.75).round() as i32
 }
