@@ -203,10 +203,10 @@ impl DocxDocument {
 
         let props = chunk.props.as_ref().unwrap();
 
-        let w_px = utils::parse_str_size(&props.width.to_owned().unwrap(), 2)?;
+        let w_px = props.width.as_ref().unwrap().get_val();
         let w_emu = utils::px_to_emu(w_px) as u32;
 
-        let h_px = utils::parse_str_size(&props.height.to_owned().unwrap(), 2)?;
+        let h_px = props.height.as_ref().unwrap().get_val();
         let h_emu = utils::px_to_emu(h_px) as u32;
 
         let pic = Pic::new(&buf).size(w_emu, h_emu);
@@ -254,8 +254,7 @@ impl DocxDocument {
             };
         }
         if let Some(indent) = &props.indent {
-            let px = utils::parse_str_size(indent, 2)?;
-            let left_emu = utils::px_to_indent(px);
+            let left_emu = utils::px_to_indent(indent.get_val());
             para_props = para_props.indent(Some(left_emu), None, None, None);
         }
         if let Some(v) = &props.line_height {
@@ -305,8 +304,7 @@ impl DocxDocument {
             run_props = run_props.color(color);
         }
         if let Some(sz) = &props.font_size {
-            let px = utils::parse_str_size(sz, 2)?;
-            let sz_pt = utils::px_to_docx_points(px) as usize;
+            let sz_pt = utils::px_to_docx_points(sz.get_val()) as usize;
             run_props = run_props.size(sz_pt);
         }
         if let Some(fam) = &props.font_family {
@@ -394,7 +392,7 @@ fn get_numbering_text(l: usize, t: NumberingType) -> String {
 #[cfg(test)]
 mod tests {
     use crate::{
-        types::{Chunk, ChunkType, Properties},
+        types::{Chunk, ChunkType, Properties, Px},
         DocxDocument,
     };
     use std::io::Write;
@@ -456,8 +454,8 @@ mod tests {
             chunk_type: ChunkType::Image,
             props: Some(Properties {
                 url: Some(url.to_owned()),
-                width: Some(format!("{}px", w.to_string())),
-                height: Some(format!("{}px", h.to_string())),
+                width: Some(Px::new(w as i32)),
+                height: Some(Px::new(h as i32)),
                 ..Default::default()
             }),
             text: None,
@@ -489,7 +487,7 @@ mod tests {
                 Some(Properties {
                     italic: Some(true),
                     underline: Some(true),
-                    font_size: Some("32px".to_owned()),
+                    font_size: Some(Px::new(32)),
                     ..Default::default()
                 }),
             ),
@@ -544,7 +542,7 @@ mod tests {
                 Some(Properties {
                     italic: Some(true),
                     underline: Some(true),
-                    font_size: Some("32px".to_owned()),
+                    font_size: Some(Px::new(32)),
                     ..Default::default()
                 }),
             ),
@@ -562,7 +560,7 @@ mod tests {
             text(
                 "Kanban".to_owned(),
                 Some(Properties {
-                    font_size: Some("32px".to_owned()),
+                    font_size: Some(Px::new(32)),
                     ..Default::default()
                 }),
             ),
@@ -606,7 +604,7 @@ mod tests {
         let chunks = vec![
             para(None),
             text("Image from url: ".to_owned(), Some(Properties{
-                font_size: Some("32px".to_owned()),
+                font_size: Some(Px::new(32)),
                 bold: Some(true),
                 ..Default::default()
             })),
@@ -625,7 +623,7 @@ mod tests {
         let chunks = vec![
             para(None),
             text("Image from Base64 String: ".to_owned(), Some(Properties{
-                font_size: Some("32px".to_owned()),
+                font_size: Some(Px::new(32)),
                 bold: Some(true),
                 ..Default::default()
             })),

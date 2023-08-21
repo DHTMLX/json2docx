@@ -1,7 +1,5 @@
 use regex::Regex;
 
-use crate::error::DocError;
-
 pub static DEFAULT_SZ_PX: usize = 16;
 
 pub fn set_panic_hook() {
@@ -13,13 +11,6 @@ pub fn set_panic_hook() {
     // https://github.com/rustwasm/console_error_panic_hook#readme
     #[cfg(feature = "console_error_panic_hook")]
     console_error_panic_hook::set_once();
-}
-
-pub fn parse_str_size(v: &String, remove_last_chars: usize) -> Result<i32, DocError> {
-    match v[0..v.len() - remove_last_chars].parse::<i32>() {
-        Ok(n) => Ok(n),
-        Err(_) => Err(DocError::new(&format!("unbale to parse string: {}", v))),
-    }
 }
 
 pub fn is_url(v: &String) -> bool {

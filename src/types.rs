@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -22,23 +24,28 @@ pub struct Chunk {
     pub text: Option<String>,
     pub props: Option<Properties>,
 }
-// TODO Px struct
+
+#[derive(Serialize, Debug, Clone, Copy)]
+pub struct Px {
+    val: i32,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Properties {
     pub url: Option<String>,
     pub color: Option<String>,
     pub background: Option<String>,
-    pub font_size: Option<String>,
+    pub font_size: Option<Px>,
     pub font_family: Option<String>,
     pub bold: Option<bool>,
     pub strike: Option<bool>,
     pub italic: Option<bool>,
     pub underline: Option<bool>,
     pub align: Option<String>,
-    pub indent: Option<String>,
+    pub indent: Option<Px>,
     pub line_height: Option<String>,
-    pub width: Option<String>,
-    pub height: Option<String>,
+    pub width: Option<Px>,
+    pub height: Option<Px>,
 }
 
 #[derive(Clone, Copy)]
@@ -55,7 +62,7 @@ pub struct NumberingData {
 impl Default for Properties {
     fn default() -> Self {
         Properties {
-            font_size: Some("16px".to_owned()),
+            font_size: Some(Px::new(16)),
             url: None,
             color: None,
             background: None,
@@ -135,6 +142,48 @@ impl<'de> Deserialize<'de> for ChunkType {
             }
             _ => Err(serde::de::Error::custom(
                 "Invalid JSON value type for chunk_type",
+            )),
+        }
+    }
+}
+
+impl Px {
+    pub fn new(px: i32) -> Px {
+        Px { val: px }
+    }
+
+    pub fn get_val(self) -> i32 {
+        self.val
+    }
+}
+
+impl FromStr for Px {
+    type Err = DocError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let v = s[0..s.len() - 2]
+            .parse::<i32>()
+            .map_err(|_| DocError::new(&format!("unable to parse value: {}", s)))?;
+        Ok(Px::new(v))
+    }
+}
+
+impl<'de> Deserialize<'de> for Px {
+    fn deserialize<D>(deserializer: D) -> Result<Px, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = Deserialize::deserialize(deserializer)?;
+
+        match value {
+            Value::String(val) => {
+                let px = val.parse::<Px>().map_err(|_| {
+                    serde::de::Error::custom(&format!("unable to parse Px value {}", val))
+                })?;
+                Ok(px)
+            }
+            _ => Err(serde::de::Error::custom(
+                "Invalid JSON value type for Px struct",
             )),
         }
     }
