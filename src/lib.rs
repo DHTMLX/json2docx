@@ -9,7 +9,8 @@ use base64::{engine::general_purpose, Engine};
 use docx_rs::{
     AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel,
     Level, LevelJc, LevelText, LineSpacing, NumberFormat, Numbering, NumberingId, Paragraph,
-    ParagraphChild, ParagraphProperty, Pic, Run, RunFonts, RunProperty, SpecialIndentType, Start,
+    ParagraphChild, ParagraphProperty, Pic, Run, RunFonts, RunProperty, Shading, ShdType,
+    SpecialIndentType, Start,
 };
 use error::DocError;
 use types::{Chunk, ChunkType, NumberingData, NumberingType, Properties};
@@ -217,6 +218,7 @@ impl DocxDocument {
         let url = chunk.props.as_ref().unwrap().url.to_owned().unwrap();
 
         if utils::is_url(&url) {
+            // TODO parse image from url
             // return Ok(utils::download_file(&url)?);
             return Err(DocError::new("image from urls not supported now"));
         }
@@ -310,10 +312,9 @@ impl DocxDocument {
         if let Some(fam) = &props.font_family {
             run_props = run_props.fonts(RunFonts::new().ascii(fam));
         }
-        // if let Some(highlight) = &props.background {
-        //     // FIXME need to support of add RunProperty.Shading in docx-rs. 'Highlight' is another thing
-        //     run_props = run_props.highlight(highlight);
-        // }
+        if let Some(b) = &props.background {
+            run_props = run_props.shading(Shading::new().shd_type(ShdType::Clear).fill(b));
+        }
 
         Ok(run_props)
     }
