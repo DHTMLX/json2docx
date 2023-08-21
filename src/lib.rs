@@ -143,7 +143,7 @@ impl DocxDocument {
         self.stack.push(block_chunk.chunk_type);
 
         let mut children: Vec<ParagraphChild> = vec![];
-        let mut max_font_size = 0;
+        let mut max_font_size: usize = 0;
 
         while self.next().is_some() {
             let c = self.curr().unwrap();
@@ -154,9 +154,11 @@ impl DocxDocument {
                     let child = ParagraphChild::Run(Box::new(run.to_owned()));
                     children.push(child);
 
-                    if let Some(sz) = &run.run_property.sz {
-                        if sz.val > max_font_size {
-                            max_font_size = sz.val;
+                    if let Some(props) = &c.props {
+                        if let Some(fs) = &props.font_size {
+                            if fs.get_val() as usize > max_font_size {
+                                max_font_size = fs.get_val() as usize;
+                            }
                         }
                     }
                 }
@@ -595,25 +597,6 @@ mod tests {
 
         let bytes = d.from_chunks(chunks);
         save_docx(bytes, "./temp/output/numbering.docx".to_owned());
-    }
-
-    // #[test]
-    fn _test_url_image() {
-        let chunks = vec![
-            para(None),
-            text("Image from url: ".to_owned(), Some(Properties{
-                font_size: Some(Px::new(32)),
-                bold: Some(true),
-                ..Default::default()
-            })),
-            image(&"https://secure.gravatar.com/avatar/f73e468790011e5382f1797ff7648b76?d=identicon&s=50".to_owned(), 60, 60),
-            end(),
-        ];
-
-        let mut d = DocxDocument::new();
-
-        let bytes = d.from_chunks(chunks);
-        save_docx(bytes, "./temp/output/image_url.docx".to_owned());
     }
 
     #[test]
