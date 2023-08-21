@@ -1,56 +1,57 @@
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
     <title>JSON 2 Docx</title>
     <style>
-        .docx-data {
-            width: 80%;
-            height: 400px;
-        }
-        button {
-            font-size: 14px; padding: 8px; margin:4px;
-        }
+      .docx-data {
+        width: 80%;
+        height: 400px;
+      }
+      button {
+        font-size: 14px;
+        padding: 8px;
+        margin: 4px;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div><textarea class="docx-data"></textarea></div>
     <button id="convert-button">download</button>
 
     <script src="./example/datasets.js"></script>
     <script type="module">
-        let $ = document.querySelector.bind(document);
+      let $ = document.querySelector.bind(document);
 
-        const dataArea = $(".docx-data");
-        dataArea.value = JSON.stringify(example, undefined, 2);
+      const dataArea = $(".docx-data");
+      dataArea.value = JSON.stringify(example, undefined, 2);
 
-        import MyWorker from "./js/worker.js?worker";
+      import MyWorker from "./js/worker.js?worker";
 
-        let worker;
-        $("#convert-button").addEventListener("click", function(e){
-            if (!worker) {
-                worker = new MyWorker();
-                worker.addEventListener("message", e => {
-                    if (e.data.type === "ready"){
-                        const blob = e.data.blob;
-                        
-                        const a = document.createElement("a");
-                        a.href = URL.createObjectURL(blob);
-                        a.download = "data.docx";
-                        document.body.append(a);
-                        a.click();
-                        document.body.remove(a);
-                    }
-                });
+      let worker;
+      $("#convert-button").addEventListener("click", function (e) {
+        if (!worker) {
+          worker = new MyWorker();
+          worker.addEventListener("message", (e) => {
+            if (e.data.type === "ready") {
+              const blob = e.data.blob;
+
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = "data.docx";
+              document.body.append(a);
+              a.click();
+              document.body.remove(a);
             }
+          });
+        }
 
-            worker.postMessage({
-                type: "convert",
-                data: dataArea.value
-            });
+        worker.postMessage({
+          type: "convert",
+          data: dataArea.value,
         });
+      });
     </script>
-
-</body>
+  </body>
 </html>

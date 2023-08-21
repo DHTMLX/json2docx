@@ -217,10 +217,8 @@ impl DocxDocument {
     fn parse_pic_source(&self, chunk: &Chunk) -> Result<Vec<u8>, DocError> {
         let url = chunk.props.as_ref().unwrap().url.to_owned().unwrap();
 
-        if utils::is_url(&url) {
-            // TODO parse image from url
-            // return Ok(utils::download_file(&url)?);
-            return Err(DocError::new("image from urls not supported now"));
+        if url.is_empty() {
+            return Ok(vec![]);
         }
 
         // try convert from base64
