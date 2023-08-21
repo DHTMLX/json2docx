@@ -5,7 +5,6 @@ export function convert(data) {
     data = JSON.parse(data);
   }
 
-  console.log(data, JSON.stringify(data));
   const doc = DocxDocument.new();
   const result = doc.from_js_chunks(data);
 

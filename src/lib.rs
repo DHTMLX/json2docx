@@ -54,8 +54,8 @@ impl DocxDocument {
     }
 
     fn build(&mut self) -> Result<Docx, DocError> {
-        let mut doc: Docx = docx_rs::Docx::new();
-        doc = doc.default_size(utils::px_to_docx_points(utils::DEFAULT_SZ_PX as i32) as usize);
+        let mut doc: Docx = docx_rs::Docx::new()
+            .default_size(utils::px_to_docx_points(utils::DEFAULT_SZ_PX as i32) as usize);
 
         while self.next().is_some() {
             let chunk = self.curr().unwrap();
@@ -282,6 +282,11 @@ impl DocxDocument {
         if let Some(bold) = props.bold {
             if bold {
                 run_props = run_props.bold();
+            }
+        }
+        if let Some(strike) = props.strike {
+            if strike {
+                run_props = run_props.strike();
             }
         }
         if let Some(italic) = props.italic {
