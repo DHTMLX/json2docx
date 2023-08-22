@@ -10,11 +10,11 @@ use base64::{engine::general_purpose, Engine};
 use docx_rs::{
     AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel,
     LineSpacing, Numbering, NumberingId, Paragraph, ParagraphChild, ParagraphProperty, Pic, Run,
-    RunFonts, RunProperty, Shading, ShdType,
+    RunFonts, RunProperty, Shading, ShdType, VertAlignType,
 };
 use error::DocError;
 use numbering::{NumberingData, NumberingType};
-use types::{Chunk, ChunkType, Properties};
+use types::{Chunk, ChunkType, MetaProps, Properties};
 use wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
@@ -88,7 +88,7 @@ impl DocxDocument {
     fn parse_block(&mut self, block_chunk: &Chunk) -> Result<Paragraph, DocError> {
         let mut para = Paragraph::new();
 
-        let (children, max_sz) = self.parse_block_content(block_chunk)?;
+        let (children, max_sz) = self.parse_block_content(block_chunk, None)?;
         para.children = children;
 
         if let Some(p) = &block_chunk.props {
@@ -138,6 +138,7 @@ impl DocxDocument {
     fn parse_block_content(
         &mut self,
         block_chunk: &Chunk,
+        meta: Option<MetaProps>,
     ) -> Result<(Vec<ParagraphChild>, usize), DocError> {
         self.stack.push(block_chunk.chunk_type);
 
@@ -149,7 +150,7 @@ impl DocxDocument {
 
             match c.chunk_type {
                 ChunkType::Text => {
-                    let run = &self.parse_text(&c)?;
+                    let run = &self.parse_text(&c, meta)?;
                     let child = ParagraphChild::Run(Box::new(run.to_owned()));
                     children.push(child);
 
@@ -160,6 +161,16 @@ impl DocxDocument {
                             }
                         }
                     }
+                }
+                ChunkType::SubScript | ChunkType::SuperScript => {
+                    let meta: MetaProps = MetaProps {
+                        subscript: c.chunk_type == ChunkType::SubScript,
+                        superscript: c.chunk_type == ChunkType::SuperScript,
+                        ..Default::default()
+                    };
+                    let (sub_children, _) = self.parse_block_content(&c, Some(meta))?;
+
+                    children.extend(sub_children);
                 }
                 ChunkType::Break => {
                     let run = Run::new().add_break(BreakType::TextWrapping);
@@ -178,7 +189,7 @@ impl DocxDocument {
                         HyperlinkType::External,
                     );
 
-                    let (link_children, max_sz) = self.parse_block_content(&c)?;
+                    let (link_children, max_sz) = self.parse_block_content(&c, None)?;
                     hp.children = link_children;
 
                     let child = ParagraphChild::Hyperlink(hp);
@@ -230,11 +241,20 @@ impl DocxDocument {
         };
     }
 
-    fn parse_text(&self, chunk: &Chunk) -> Result<Run, DocError> {
+    fn parse_text(&self, chunk: &Chunk, meta: Option<MetaProps>) -> Result<Run, DocError> {
         let mut run = Run::new().add_text(chunk.text.to_owned().unwrap());
         if let Some(p) = &chunk.props {
             run.run_property = self.parse_run_props(p)?;
         }
+
+        if let Some(m) = &meta {
+            if m.subscript {
+                run.run_property = run.run_property.vert_align(VertAlignType::SubScript);
+            } else if m.superscript {
+                run.run_property = run.run_property.vert_align(VertAlignType::SuperScript);
+            }
+        }
+
         Ok(run)
     }
 
@@ -432,6 +452,20 @@ mod tests {
                 height: Some(Px::new(h as i32)),
                 ..Default::default()
             }),
+            text: None,
+        }
+    }
+    fn sub() -> Chunk {
+        Chunk {
+            chunk_type: ChunkType::SubScript,
+            props: None,
+            text: None,
+        }
+    }
+    fn spr() -> Chunk {
+        Chunk {
+            chunk_type: ChunkType::SuperScript,
+            props: None,
             text: None,
         }
     }
@@ -637,5 +671,28 @@ mod tests {
 
         let bytes = d.from_chunks(chunks);
         save_docx(bytes, "./temp/output/spacing.docx".to_owned());
+    }
+
+    #[test]
+    fn test_sub_super_script() {
+        let chunks = vec![
+            para(None),
+            /**/ text("text".to_owned(), None),
+            /**/ spr(),
+            /**//**/ text("superscripted".to_owned(), None),
+            /**/ end(),
+            end(),
+            para(None),
+            /**/ text("text".to_owned(), None),
+            /**/ sub(),
+            /**//**/ text("subscripted".to_owned(), None),
+            /**/ end(),
+            end(),
+        ];
+
+        let mut d = DocxDocument::new();
+
+        let bytes = d.from_chunks(chunks);
+        save_docx(bytes, "./temp/output/sub-super-script.docx".to_owned());
     }
 }

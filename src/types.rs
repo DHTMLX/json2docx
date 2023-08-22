@@ -7,6 +7,7 @@ use crate::error::DocError;
 
 #[derive(Serialize, PartialEq, Clone, Copy)]
 pub enum ChunkType {
+    Other = 0,
     Paragraph = 2 | 0x4000 | 0x2000,
     Text = 3 | 0x8000,
     Image = 5 | 0x8000,
@@ -16,6 +17,8 @@ pub enum ChunkType {
     Li = 10 | 0x2000 | 0x4000,
     End = 0x1fff,
     Break = 11 | 0x4000,
+    SubScript = 13 | 0x2000 | 0x8000,
+    SuperScript = 14 | 0x2000 | 0x8000,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -46,6 +49,12 @@ pub struct Properties {
     pub line_height: Option<String>,
     pub width: Option<Px>,
     pub height: Option<Px>,
+}
+
+#[derive(Default, Copy, Clone)]
+pub struct MetaProps {
+    pub subscript: bool,
+    pub superscript: bool,
 }
 
 impl Default for Properties {
@@ -92,7 +101,9 @@ impl<'de> Deserialize<'de> for ChunkType {
                     24586 => Ok(ChunkType::Li),
                     8191 => Ok(ChunkType::End),
                     16395 => Ok(ChunkType::Break),
-                    _ => Err(serde::de::Error::custom("Unknown chunk_type value")),
+                    40973 => Ok(ChunkType::SubScript),
+                    40974 => Ok(ChunkType::SuperScript),
+                    _ => Ok(ChunkType::Other),
                 }
             }
             _ => Err(serde::de::Error::custom(
