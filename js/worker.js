@@ -8,11 +8,12 @@ onmessage = function (e) {
   }
 };
 
-function doConvert(data, config = {}) {
+async function doConvert(data, config = {}) {
   const doc = DocxDocument.new();
-  const result = doc.from_js_chunks(data);
+  const bytes = await doc.from_js_chunks(data);
+  const uint8 = Uint8Array.from(bytes);
 
-  const blob = new Blob([result], {
+  const blob = new Blob([uint8], {
     type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,",
   });
 

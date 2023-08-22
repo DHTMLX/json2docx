@@ -1251,6 +1251,15 @@ var example = [
     },
   },
   {
+    id: 171,
+    chunk_type: 32773,
+    props: {
+      url: "https://secure.gravatar.com/avatar/f73e468790011e5382f1797ff7648b76?d=identicon&s=50",
+      width: "60px",
+      height: "60px",
+    },
+  },
+  {
     id: 172,
     chunk_type: 8191,
   },

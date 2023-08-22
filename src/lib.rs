@@ -4,6 +4,7 @@ mod types;
 mod utils;
 
 use std::io::Cursor;
+use std::pin::Pin;
 
 use base64::{engine::general_purpose, Engine};
 
@@ -13,12 +14,17 @@ use docx_rs::{
     RunFonts, RunProperty, Shading, ShdType, VertAlignType,
 };
 use error::DocError;
+use js_sys::Uint8Array;
 use numbering::{NumberingData, NumberingType};
 use types::{Chunk, ChunkType, MetaProps, Properties};
 use wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
 use gloo_utils::format::JsValueSerdeExt;
+
+use wasm_bindgen_futures::{self, JsFuture};
+use wasm_bindgen_test::console_log;
+use web_sys::{Request, RequestInit, RequestMode, Response};
 
 #[wasm_bindgen]
 #[derive(Default)]
@@ -28,7 +34,14 @@ pub struct DocxDocument {
     it: usize,
     it_start: bool,
     numberings: Vec<NumberingData>,
+
+    futures: Vec<(
+        String,
+        Pin<Box<dyn std::future::Future<Output = Result<JsValue, JsValue>>>>,
+    )>,
 }
+
+use wasm_bindgen::JsValue; // Assuming you're working with WebAssembly here
 
 #[wasm_bindgen]
 impl DocxDocument {
@@ -36,24 +49,32 @@ impl DocxDocument {
         Default::default()
     }
 
-    pub fn from_js_chunks(&mut self, raw: &JsValue) -> Vec<u8> {
+    pub async fn from_js_chunks(&mut self, raw: &JsValue) -> Result<JsValue, JsValue> {
         utils::set_panic_hook();
         let chunks: Vec<Chunk> = raw.into_serde().unwrap();
-        self.from_chunks(chunks)
+        let res = self.from_chunks(chunks).await;
+
+        let val = JsValue::from_serde(&res).unwrap();
+
+        Ok(val)
     }
 
-    fn from_chunks(&mut self, chunks: Vec<Chunk>) -> Vec<u8> {
+    async fn from_chunks(&mut self, chunks: Vec<Chunk>) -> Vec<u8> {
         self.chunks = chunks;
-        let docx = self.build().unwrap();
+
+        let docx = self.build().await.unwrap();
 
         let buf: Vec<u8> = vec![];
         let w: Cursor<Vec<u8>> = Cursor::new(buf);
 
         let res = docx.build().pack(w).unwrap();
-        res.get_ref().to_owned()
+
+        let bytes = res.get_ref().to_owned();
+
+        bytes
     }
 
-    fn build(&mut self) -> Result<Docx, DocError> {
+    async fn build(&mut self) -> Result<Docx, DocError> {
         let mut doc: Docx = docx_rs::Docx::new()
             .default_size(utils::px_to_docx_points(utils::DEFAULT_SZ_PX as i32) as usize);
 
@@ -81,6 +102,19 @@ impl DocxDocument {
         }
 
         doc = self.build_numbering(doc);
+
+        for (id, f) in self.futures.iter_mut() {
+            let res = f.await;
+
+            match res {
+                Ok(v) => {
+                    let arr = Uint8Array::new(&v);
+                    let b = arr.to_vec();
+                    doc = doc.add_defer_image(id.to_owned(), b);
+                }
+                Err(v) => console_log!("Error: {:?}", v),
+            }
+        }
 
         Ok(doc)
     }
@@ -210,35 +244,43 @@ impl DocxDocument {
         Err(DocError::new("unexpected end of statement"))
     }
 
-    fn parse_pic(&self, chunk: &Chunk) -> Result<Pic, DocError> {
-        let buf = self.parse_pic_source(chunk)?;
-
+    fn parse_pic(&mut self, chunk: &Chunk) -> Result<Pic, DocError> {
         let props = chunk.props.as_ref().unwrap();
 
         let w_px = props.width.as_ref().unwrap().get_val();
         let w_emu = utils::px_to_emu(w_px) as u32;
-
         let h_px = props.height.as_ref().unwrap().get_val();
         let h_emu = utils::px_to_emu(h_px) as u32;
 
-        let pic = Pic::new(&buf).size(w_emu, h_emu);
+        let mut pic = Pic::new(&vec![]).size(w_emu, h_emu);
+
+        let buf = self.parse_pic_source(pic.id.to_owned(), chunk)?;
+        pic = pic.buf(buf);
 
         Ok(pic)
     }
 
-    fn parse_pic_source(&self, chunk: &Chunk) -> Result<Vec<u8>, DocError> {
+    fn parse_pic_source(&mut self, id: String, chunk: &Chunk) -> Result<Vec<u8>, DocError> {
         let url = chunk.props.as_ref().unwrap().url.to_owned().unwrap();
 
         if url.is_empty() {
             return Ok(vec![]);
         }
 
-        // try convert from base64
-        let res = general_purpose::STANDARD.decode(&url);
-        match res {
-            Ok(bytes) => return Ok(bytes),
-            Err(e) => return Err(DocError::new(&e.to_string())),
-        };
+        if url.starts_with("http") {
+            let res = download(url.to_owned());
+
+            self.futures.push((id, Box::pin(res)));
+
+            Ok(vec![])
+        } else {
+            // try convert from base64
+            let res = general_purpose::STANDARD.decode(&url);
+            match res {
+                Ok(bytes) => return Ok(bytes),
+                Err(e) => return Err(DocError::new(&e.to_string())),
+            };
+        }
     }
 
     fn parse_text(&self, chunk: &Chunk, meta: Option<MetaProps>) -> Result<Run, DocError> {
@@ -383,316 +425,360 @@ impl DocxDocument {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::{
-        types::{Chunk, ChunkType, Properties, Px},
-        DocxDocument,
-    };
-    use std::io::Write;
+pub async fn download(url: String) -> Result<JsValue, JsValue> {
+    let mut opts = RequestInit::new();
+    opts.method("GET");
+    opts.mode(RequestMode::Cors);
 
-    fn text(text: String, props: Option<Properties>) -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::Text,
-            text: Some(text.to_owned()),
-            props: props,
-        }
-    }
-    fn para(props: Option<Properties>) -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::Paragraph,
-            text: None,
-            props: props,
-        }
-    }
-    fn ol(props: Option<Properties>) -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::Ol,
-            text: None,
-            props: props,
-        }
-    }
-    fn ul(props: Option<Properties>) -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::Ul,
-            text: None,
-            props: props,
-        }
-    }
-    fn li(props: Option<Properties>) -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::Li,
-            text: None,
-            props: props,
-        }
-    }
-    fn end() -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::End,
-            text: None,
-            props: Default::default(),
-        }
-    }
-    fn hyperlink(url: String) -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::Link,
-            text: None,
-            props: Some(Properties {
-                url: Some(url),
-                ..Default::default()
-            }),
-        }
-    }
-    fn image(url: &String, w: usize, h: usize) -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::Image,
-            props: Some(Properties {
-                url: Some(url.to_owned()),
-                width: Some(Px::new(w as i32)),
-                height: Some(Px::new(h as i32)),
-                ..Default::default()
-            }),
-            text: None,
-        }
-    }
-    fn sub() -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::SubScript,
-            props: None,
-            text: None,
-        }
-    }
-    fn spr() -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::SuperScript,
-            props: None,
-            text: None,
-        }
-    }
+    let request = Request::new_with_str_and_init(&url, &opts)?;
 
-    fn save_docx(data: Vec<u8>, path: String) {
-        let p = std::path::Path::new(&path);
-        let mut file = std::fs::File::create(&p).unwrap();
-        file.write_all(&data).unwrap();
-    }
+    request.headers().set("Accept", "image/*")?;
 
-    #[test]
-    fn test_para() {
-        let chunks = vec![
-            para(Some(Properties {
-                align: Some("end".to_owned()),
-                ..Default::default()
-            })),
-            text(
-                "Hello".to_owned(),
-                Some(Properties {
-                    bold: Some(true),
-                    ..Default::default()
-                }),
-            ),
-            text(
-                "Rust".to_owned(),
-                Some(Properties {
-                    italic: Some(true),
-                    underline: Some(true),
-                    font_size: Some(Px::new(32)),
-                    ..Default::default()
-                }),
-            ),
-            text(
-                "!!!".to_owned(),
-                Some(Properties {
-                    background: Some("#123".to_owned()),
-                    ..Default::default()
-                }),
-            ),
-            end(),
-            para(Some(Properties {
-                align: Some("center".to_owned()),
-                ..Default::default()
-            })),
-            hyperlink("https://webix.com".to_owned()),
-            text(
-                "Visit webix".to_owned(),
-                Some(Properties {
-                    underline: Some(true),
-                    color: Some("#0066ff".to_owned()),
-                    background: Some("#ff00ff".to_owned()),
-                    ..Default::default()
-                }),
-            ),
-            end(),
-            end(),
-        ];
+    let window = web_sys::window().unwrap();
 
-        let mut d = DocxDocument::new();
+    let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
 
-        let bytes = d.from_chunks(chunks);
-        save_docx(bytes, "./temp/output/styles.docx".to_owned());
-    }
+    // `resp_value` is a `Response` object.
+    assert!(resp_value.is_instance_of::<Response>());
+    let resp: Response = resp_value.dyn_into().unwrap();
 
-    #[test]
-    fn test_numbering() {
-        let chunks = vec![
-            para(Some(Properties {
-                align: Some("end".to_owned()),
-                ..Default::default()
-            })),
-            text(
-                "Hello".to_owned(),
-                Some(Properties {
-                    bold: Some(true),
-                    ..Default::default()
-                }),
-            ),
-            text(
-                "Rust".to_owned(),
-                Some(Properties {
-                    italic: Some(true),
-                    underline: Some(true),
-                    font_size: Some(Px::new(32)),
-                    ..Default::default()
-                }),
-            ),
-            text(
-                "!!!".to_owned(),
-                Some(Properties {
-                    background: Some("#123".to_owned()),
-                    ..Default::default()
-                }),
-            ),
-            end(),
-            ul(None),
-            /**/ li(None),
-            /**//**/
-            text(
-                "Kanban".to_owned(),
-                Some(Properties {
-                    font_size: Some(Px::new(32)),
-                    ..Default::default()
-                }),
-            ),
-            /**/ end(),
-            /**/ li(None),
-            /**//**/ text("To Do List".to_owned(), None),
-            /**/ end(),
-            /**/ ol(None),
-            /**//**/ li(None),
-            /**//**//**/ text("Label".to_owned(), None),
-            /**//**/ end(),
-            /**//**/ li(None),
-            /**//**//**/ text("Due date".to_owned(), None),
-            /**//**/ end(),
-            /**//**/ ul(None),
-            /**//**//**/ li(None),
-            /**//**//**//**/ text("Time zone".to_owned(), None),
-            /**//**//**/ end(),
-            /**//**//**/ li(None),
-            /**//**//**//**/ text("Time".to_owned(), None),
-            /**//**//**/ end(),
-            /**//**/ end(),
-            /**//**/ li(None),
-            /**//**//**/ text("Checked".to_owned(), None),
-            /**//**/ end(),
-            /**/ end(),
-            /**/ li(None),
-            /**//**/ text("Gantt".to_owned(), None),
-            /**/ end(),
-            end(),
-        ];
-
-        let mut d = DocxDocument::new();
-
-        let bytes = d.from_chunks(chunks);
-        save_docx(bytes, "./temp/output/numbering.docx".to_owned());
-    }
-
-    #[test]
-    fn test_base64_image() {
-        let chunks = vec![
-            para(None),
-            text("Image from Base64 String: ".to_owned(), Some(Properties{
-                font_size: Some(Px::new(32)),
-                bold: Some(true),
-                ..Default::default()
-            })),
-            image(&"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".to_owned(), 30, 30),
-            end(),
-        ];
-
-        let mut d = DocxDocument::new();
-
-        let bytes = d.from_chunks(chunks);
-        save_docx(bytes, "./temp/output/image_base64.docx".to_owned());
-    }
-
-    #[test]
-    fn test_spacing() {
-        let chunks = vec![
-            para(None),
-            text("Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
-            end(),
-            para(Some(Properties {
-                line_height: Some("1.0".to_owned()),
-                ..Default::default()
-            })),
-            text("1.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
-            end(),
-            para(None),
-            text("Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
-            end(),
-            para(Some(Properties {
-                line_height: Some("2.0".to_owned()),
-                ..Default::default()
-            })),
-            text("2.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
-            end(),
-            para(Some(Properties {
-                line_height: Some("3.0".to_owned()),
-                ..Default::default()
-            })),
-            text("3.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
-            end(),
-            para(Some(Properties {
-                line_height: Some("4.0".to_owned()),
-                ..Default::default()
-            })),
-            text("4.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
-            end(),
-            para(Some(Properties {
-                line_height: Some("1.5".to_owned()),
-                ..Default::default()
-            })),
-            text("1.5 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
-            end(),
-        ];
-
-        let mut d = DocxDocument::new();
-
-        let bytes = d.from_chunks(chunks);
-        save_docx(bytes, "./temp/output/spacing.docx".to_owned());
-    }
-
-    #[test]
-    fn test_sub_super_script() {
-        let chunks = vec![
-            para(None),
-            /**/ text("text".to_owned(), None),
-            /**/ spr(),
-            /**//**/ text("superscripted".to_owned(), None),
-            /**/ end(),
-            end(),
-            para(None),
-            /**/ text("text".to_owned(), None),
-            /**/ sub(),
-            /**//**/ text("subscripted".to_owned(), None),
-            /**/ end(),
-            end(),
-        ];
-
-        let mut d = DocxDocument::new();
-
-        let bytes = d.from_chunks(chunks);
-        save_docx(bytes, "./temp/output/sub-super-script.docx".to_owned());
-    }
+    // Convert this other `Promise` into a rust `Future`.
+    let blob = JsFuture::from(resp.array_buffer()?).await?;
+    Ok(blob)
 }
+
+// #[cfg(test)]
+// pub mod tests {
+//     wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+//     use crate::{
+//         types::{Chunk, ChunkType, Properties, Px},
+//         DocxDocument,
+//     };
+//     use std::io::Write;
+//     use wasm_bindgen_test::*;
+
+//     fn text(text: String, props: Option<Properties>) -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::Text,
+//             text: Some(text.to_owned()),
+//             props: props,
+//         }
+//     }
+//     fn para(props: Option<Properties>) -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::Paragraph,
+//             text: None,
+//             props: props,
+//         }
+//     }
+//     fn ol(props: Option<Properties>) -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::Ol,
+//             text: None,
+//             props: props,
+//         }
+//     }
+//     fn ul(props: Option<Properties>) -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::Ul,
+//             text: None,
+//             props: props,
+//         }
+//     }
+//     fn li(props: Option<Properties>) -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::Li,
+//             text: None,
+//             props: props,
+//         }
+//     }
+//     fn end() -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::End,
+//             text: None,
+//             props: Default::default(),
+//         }
+//     }
+//     fn hyperlink(url: String) -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::Link,
+//             text: None,
+//             props: Some(Properties {
+//                 url: Some(url),
+//                 ..Default::default()
+//             }),
+//         }
+//     }
+//     fn image(url: &String, w: usize, h: usize) -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::Image,
+//             props: Some(Properties {
+//                 url: Some(url.to_owned()),
+//                 width: Some(Px::new(w as i32)),
+//                 height: Some(Px::new(h as i32)),
+//                 ..Default::default()
+//             }),
+//             text: None,
+//         }
+//     }
+//     fn sub() -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::SubScript,
+//             props: None,
+//             text: None,
+//         }
+//     }
+//     fn spr() -> Chunk {
+//         Chunk {
+//             chunk_type: ChunkType::SuperScript,
+//             props: None,
+//             text: None,
+//         }
+//     }
+
+//     fn save_docx(data: Vec<u8>, path: String) {
+//         let p = std::path::Path::new(&path);
+//         let mut file = std::fs::File::create(&p).unwrap();
+//         file.write_all(&data).unwrap();
+//     }
+
+//     #[test]
+//     fn test_para() {
+//         let chunks = vec![
+//             para(Some(Properties {
+//                 align: Some("end".to_owned()),
+//                 ..Default::default()
+//             })),
+//             text(
+//                 "Hello".to_owned(),
+//                 Some(Properties {
+//                     bold: Some(true),
+//                     ..Default::default()
+//                 }),
+//             ),
+//             text(
+//                 "Rust".to_owned(),
+//                 Some(Properties {
+//                     italic: Some(true),
+//                     underline: Some(true),
+//                     font_size: Some(Px::new(32)),
+//                     ..Default::default()
+//                 }),
+//             ),
+//             text(
+//                 "!!!".to_owned(),
+//                 Some(Properties {
+//                     background: Some("#123".to_owned()),
+//                     ..Default::default()
+//                 }),
+//             ),
+//             end(),
+//             para(Some(Properties {
+//                 align: Some("center".to_owned()),
+//                 ..Default::default()
+//             })),
+//             hyperlink("https://webix.com".to_owned()),
+//             text(
+//                 "Visit webix".to_owned(),
+//                 Some(Properties {
+//                     underline: Some(true),
+//                     color: Some("#0066ff".to_owned()),
+//                     background: Some("#ff00ff".to_owned()),
+//                     ..Default::default()
+//                 }),
+//             ),
+//             end(),
+//             end(),
+//         ];
+
+//         let mut d = DocxDocument::new();
+
+//         let bytes = d.from_chunks(chunks);
+//         save_docx(bytes, "./temp/output/styles.docx".to_owned());
+//     }
+
+//     #[test]
+//     fn test_numbering() {
+//         let chunks = vec![
+//             para(Some(Properties {
+//                 align: Some("end".to_owned()),
+//                 ..Default::default()
+//             })),
+//             text(
+//                 "Hello".to_owned(),
+//                 Some(Properties {
+//                     bold: Some(true),
+//                     ..Default::default()
+//                 }),
+//             ),
+//             text(
+//                 "Rust".to_owned(),
+//                 Some(Properties {
+//                     italic: Some(true),
+//                     underline: Some(true),
+//                     font_size: Some(Px::new(32)),
+//                     ..Default::default()
+//                 }),
+//             ),
+//             text(
+//                 "!!!".to_owned(),
+//                 Some(Properties {
+//                     background: Some("#123".to_owned()),
+//                     ..Default::default()
+//                 }),
+//             ),
+//             end(),
+//             ul(None),
+//             /**/ li(None),
+//             /**//**/
+//             text(
+//                 "Kanban".to_owned(),
+//                 Some(Properties {
+//                     font_size: Some(Px::new(32)),
+//                     ..Default::default()
+//                 }),
+//             ),
+//             /**/ end(),
+//             /**/ li(None),
+//             /**//**/ text("To Do List".to_owned(), None),
+//             /**/ end(),
+//             /**/ ol(None),
+//             /**//**/ li(None),
+//             /**//**//**/ text("Label".to_owned(), None),
+//             /**//**/ end(),
+//             /**//**/ li(None),
+//             /**//**//**/ text("Due date".to_owned(), None),
+//             /**//**/ end(),
+//             /**//**/ ul(None),
+//             /**//**//**/ li(None),
+//             /**//**//**//**/ text("Time zone".to_owned(), None),
+//             /**//**//**/ end(),
+//             /**//**//**/ li(None),
+//             /**//**//**//**/ text("Time".to_owned(), None),
+//             /**//**//**/ end(),
+//             /**//**/ end(),
+//             /**//**/ li(None),
+//             /**//**//**/ text("Checked".to_owned(), None),
+//             /**//**/ end(),
+//             /**/ end(),
+//             /**/ li(None),
+//             /**//**/ text("Gantt".to_owned(), None),
+//             /**/ end(),
+//             end(),
+//         ];
+
+//         let mut d = DocxDocument::new();
+
+//         let bytes = d.from_chunks(chunks);
+//         save_docx(bytes, "./temp/output/numbering.docx".to_owned());
+//     }
+
+//     #[test]
+//     fn test_base64_image() {
+//         let chunks = vec![
+//             para(None),
+//             text("Image from Base64 String: ".to_owned(), Some(Properties{
+//                 font_size: Some(Px::new(32)),
+//                 bold: Some(true),
+//                 ..Default::default()
+//             })),
+//             image(&"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".to_owned(), 30, 30),
+//             end(),
+//         ];
+
+//         let mut d = DocxDocument::new();
+
+//         let bytes = d.from_chunks(chunks);
+//         save_docx(bytes, "./temp/output/image_base64.docx".to_owned());
+//     }
+
+//     #[wasm_bindgen_test]
+//     fn test_url_image() {
+//         let chunks = vec![
+//             para(None),
+//             text("Image from Base64 String: ".to_owned(), Some(Properties{
+//                 font_size: Some(Px::new(32)),
+//                 bold: Some(true),
+//                 ..Default::default()
+//             })),
+//             image(&"https://secure.gravatar.com/avatar/f73e468790011e5382f1797ff7648b76?d=identicon&s=50".to_owned(), 30, 30),
+//             end(),
+//         ];
+
+//         let mut d = DocxDocument::new();
+
+//         let bytes = d.from_chunks(chunks);
+//         save_docx(bytes, "./temp/output/image_url.docx".to_owned());
+//     }
+
+//     #[test]
+//     fn test_spacing() {
+//         let chunks = vec![
+//             para(None),
+//             text("Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+//             end(),
+//             para(Some(Properties {
+//                 line_height: Some("1.0".to_owned()),
+//                 ..Default::default()
+//             })),
+//             text("1.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+//             end(),
+//             para(None),
+//             text("Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+//             end(),
+//             para(Some(Properties {
+//                 line_height: Some("2.0".to_owned()),
+//                 ..Default::default()
+//             })),
+//             text("2.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+//             end(),
+//             para(Some(Properties {
+//                 line_height: Some("3.0".to_owned()),
+//                 ..Default::default()
+//             })),
+//             text("3.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+//             end(),
+//             para(Some(Properties {
+//                 line_height: Some("4.0".to_owned()),
+//                 ..Default::default()
+//             })),
+//             text("4.0 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+//             end(),
+//             para(Some(Properties {
+//                 line_height: Some("1.5".to_owned()),
+//                 ..Default::default()
+//             })),
+//             text("1.5 Pariatur excepteur aute magna veniam commodo consectetur sit cupidatat non dolor minim adipisicing voluptate in.".to_owned(), None),
+//             end(),
+//         ];
+
+//         let mut d = DocxDocument::new();
+
+//         let bytes = d.from_chunks(chunks);
+//         save_docx(bytes, "./temp/output/spacing.docx".to_owned());
+//     }
+
+//     #[test]
+//     fn test_sub_super_script() {
+//         let chunks = vec![
+//             para(None),
+//             /**/ text("text".to_owned(), None),
+//             /**/ spr(),
+//             /**//**/ text("superscripted".to_owned(), None),
+//             /**/ end(),
+//             end(),
+//             para(None),
+//             /**/ text("text".to_owned(), None),
+//             /**/ sub(),
+//             /**//**/ text("subscripted".to_owned(), None),
+//             /**/ end(),
+//             end(),
+//         ];
+
+//         let mut d = DocxDocument::new();
+
+//         let bytes = d.from_chunks(chunks);
+//         save_docx(bytes, "./temp/output/sub-super-script.docx".to_owned());
+//     }
+// }

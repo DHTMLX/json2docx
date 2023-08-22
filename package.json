@@ -14,7 +14,7 @@
   ],
   "module": "js/module.js",
   "scripts": {
-    "dev": "cargo build && wasm-pack build && vite build && vite",
+    "dev": "cargo update && cargo build && wasm-pack build && vite build && vite",
     "start": "vite",
     "build": "vite build",
     "preview": "vite preview"
