@@ -14,7 +14,6 @@ cargo install wasm-pack
 
 ```
 yarn
-yarn build
 yarn dev
 ```
 

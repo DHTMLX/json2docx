@@ -48,17 +48,6 @@ pub struct Properties {
     pub height: Option<Px>,
 }
 
-#[derive(Clone, Copy)]
-pub enum NumberingType {
-    Bullet,
-    Decimal,
-}
-
-pub struct NumberingData {
-    id: usize,
-    num_type: NumberingType,
-}
-
 impl Default for Properties {
     fn default() -> Self {
         Properties {
@@ -77,40 +66,6 @@ impl Default for Properties {
             width: None,
             height: None,
         }
-    }
-}
-
-impl NumberingType {
-    pub fn to_string(self) -> String {
-        match self {
-            NumberingType::Bullet => "bullet".to_string(),
-            NumberingType::Decimal => "decimal".to_string(),
-        }
-    }
-
-    pub fn from_chunk_type(value: ChunkType) -> Result<NumberingType, DocError> {
-        match value {
-            ChunkType::Ul => Ok(NumberingType::Bullet),
-            ChunkType::Ol => Ok(NumberingType::Decimal),
-            _ => return Err(DocError::new("unknown numbering type")),
-        }
-    }
-}
-
-impl NumberingData {
-    pub fn new(id: usize, t: NumberingType) -> NumberingData {
-        NumberingData {
-            id: id,
-            num_type: t,
-        }
-    }
-
-    pub fn get_id(&self) -> usize {
-        self.id
-    }
-
-    pub fn get_type(&self) -> NumberingType {
-        self.num_type
     }
 }
 

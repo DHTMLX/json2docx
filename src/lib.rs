@@ -1,4 +1,5 @@
 mod error;
+mod numbering;
 mod types;
 mod utils;
 
@@ -8,18 +9,16 @@ use base64::{engine::general_purpose, Engine};
 
 use docx_rs::{
     AbstractNumbering, AlignmentType, BreakType, Docx, Hyperlink, HyperlinkType, IndentLevel,
-    Level, LevelJc, LevelText, LineSpacing, NumberFormat, Numbering, NumberingId, Paragraph,
-    ParagraphChild, ParagraphProperty, Pic, Run, RunFonts, RunProperty, Shading, ShdType,
-    SpecialIndentType, Start,
+    LineSpacing, Numbering, NumberingId, Paragraph, ParagraphChild, ParagraphProperty, Pic, Run,
+    RunFonts, RunProperty, Shading, ShdType,
 };
 use error::DocError;
-use types::{Chunk, ChunkType, NumberingData, NumberingType, Properties};
+use numbering::{NumberingData, NumberingType};
+use types::{Chunk, ChunkType, Properties};
 use wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
 use gloo_utils::format::JsValueSerdeExt;
-
-const BULLETS: [&str; 3] = ["\u{2022}", "\u{25E6}", "\u{25AA}"];
 
 #[wasm_bindgen]
 #[derive(Default)]
@@ -352,7 +351,7 @@ impl DocxDocument {
         for num in &self.numberings {
             let mut n = AbstractNumbering::new(num.get_id());
             for i in 0..9 {
-                n = n.add_level(numbering_level(i, num.get_type()))
+                n = n.add_level(numbering::numbering_level(i, num.get_type()))
             }
 
             docx = docx
@@ -361,31 +360,6 @@ impl DocxDocument {
         }
 
         docx
-    }
-}
-
-fn numbering_level(l: usize, t: NumberingType) -> Level {
-    Level::new(
-        l,
-        Start::new(1),
-        NumberFormat::new(t.to_string()),
-        LevelText::new(get_numbering_text(l, t)),
-        LevelJc::new("left"),
-    )
-    .indent(
-        Some(((l + 2) * 360) as i32),
-        Some(SpecialIndentType::Hanging(320)),
-        // None,
-        None,
-        None,
-    )
-    .size(utils::px_to_docx_points(16) as usize) // 12 pt
-}
-
-fn get_numbering_text(l: usize, t: NumberingType) -> String {
-    match t {
-        NumberingType::Bullet => BULLETS[l % BULLETS.len()].to_owned(),
-        NumberingType::Decimal => format!("%{}.", l + 1).to_owned(),
     }
 }
 
