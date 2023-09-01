@@ -12,13 +12,14 @@ pub enum ChunkType {
     Text = 3 | 0x8000,
     Image = 5 | 0x8000,
     Link = 6 | 0x2000 | 0x8000,
+    Newline = 7 | 0x8000,
     Ul = 8 | 0x2000 | 0x4000,
     Ol = 9 | 0x2000 | 0x4000,
     Li = 10 | 0x2000 | 0x4000,
-    End = 0x1fff,
     Break = 11 | 0x4000,
     SubScript = 13 | 0x2000 | 0x8000,
     SuperScript = 14 | 0x2000 | 0x8000,
+    End = 0x1fff,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -96,6 +97,7 @@ impl<'de> Deserialize<'de> for ChunkType {
                     32771 => Ok(ChunkType::Text),
                     32773 => Ok(ChunkType::Image),
                     40966 => Ok(ChunkType::Link),
+                    32775 => Ok(ChunkType::Newline),
                     24584 => Ok(ChunkType::Ul),
                     24585 => Ok(ChunkType::Ol),
                     24586 => Ok(ChunkType::Li),

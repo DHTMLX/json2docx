@@ -93,6 +93,7 @@ impl DocxDocument {
                         doc = doc.add_paragraph(p.to_owned());
                     }
                 }
+                ChunkType::Break => doc = doc.add_paragraph(Paragraph::new()),
                 _ => continue,
             }
         }
@@ -206,7 +207,7 @@ impl DocxDocument {
 
                     children.extend(sub_children);
                 }
-                ChunkType::Break => {
+                ChunkType::Newline => {
                     let run = Run::new().add_break(BreakType::TextWrapping);
                     let child = ParagraphChild::Run(Box::new(run));
                     children.push(child);
